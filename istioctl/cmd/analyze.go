@@ -28,7 +28,7 @@ func Analyze() *cobra.Command {
 	return &cobra.Command{
 		Use:     "analyze",
 		Short:   "Analyze Istio configuration",
-		Example: `istioctl experimental analyze <directory>`,
+		Example: `istioctl experimental analyze <file|globpattern>...`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			files, err := gatherFiles(args)
