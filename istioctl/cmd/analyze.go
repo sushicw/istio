@@ -21,6 +21,7 @@ import (
 	"istio.io/istio/galley/pkg/config/analysis/local"
 	"istio.io/istio/galley/pkg/config/event"
 	"istio.io/istio/galley/pkg/config/processor/metadata"
+	"istio.io/istio/galley/pkg/config/source/priority"
 
 	"github.com/spf13/cobra"
 )
@@ -51,16 +52,31 @@ istioctl experimental analyze -k -c $HOME/.kube/config
 
 			m := metadata.MustGet()
 
-			// TODO: Allow combining kube & file-based instead of making it either/or
-			var src event.Source
+			// If we're using kube, use that as a base source.
+			var sources = make([]event.Source, 0)
 			if useKube {
-				src, err = local.GetKubeBasedSource(m, kubeconfig)
-			} else {
-				src, err = local.GetFileBasedSource(m, files)
+				src, err := local.GetKubeBasedSource(m, kubeconfig)
+				if err != nil {
+					return err
+				}
+				sources = append(sources, src)
 			}
-			if err != nil {
-				return err
+
+			// If files are provided, treat them (collectively) as a single source.
+			// TODO: Should we instead treat each file as a separate source, so any inter-file collisions are handled in priority order?
+			if len(files) > 0 {
+				src, err := local.GetFileBasedSource(m, files)
+				if err != nil {
+					return err
+				}
+				sources = append(sources, src)
 			}
+
+			if len(sources) == 0 {
+				return fmt.Errorf("At least one file and/or kubernetes source must be provided")
+			}
+
+			src := priority.New(sources...)
 
 			messages, err := local.AnalyzeSource(m, "svc.local", src, cancel)
 			if err != nil {
