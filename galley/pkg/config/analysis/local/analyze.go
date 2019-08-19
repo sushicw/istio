@@ -27,31 +27,22 @@ import (
 	"istio.io/istio/galley/pkg/config/meshcfg"
 	"istio.io/istio/galley/pkg/config/processing/snapshotter"
 	"istio.io/istio/galley/pkg/config/processor"
-	"istio.io/istio/galley/pkg/config/processor/metadata"
+	"istio.io/istio/galley/pkg/config/schema"
+	"istio.io/istio/galley/pkg/config/source/kube"
+	"istio.io/istio/galley/pkg/config/source/kube/apiserver"
 	"istio.io/istio/galley/pkg/config/source/kube/inmemory"
+	"istio.io/istio/galley/pkg/source/kube/client"
 )
 
-// AnalyzeFiles loads yaml files from given paths, parses and analyzes them.
-func AnalyzeFiles(domainSuffix string, cancel chan struct{}, files ...string) (diag.Messages, error) {
+// AnalyzeSource handles local analysis of an event source (e.g. file based, k8s based, or combined)
+// TODO: What do I need to do to properly handle domainSuffix?
+func AnalyzeSource(m *schema.Metadata, domainSuffix string, src event.Source, cancel chan struct{}) (diag.Messages, error) {
 	o := log.DefaultOptions()
 	o.SetOutputLevel("processing", log.ErrorLevel)
 	o.SetOutputLevel("source", log.ErrorLevel)
 	err := log.Configure(o)
 	if err != nil {
 		return nil, fmt.Errorf("unable to configure logging: %v", err)
-	}
-
-	m := metadata.MustGet()
-
-	src := inmemory.NewKubeSource(m.KubeSource().Resources())
-	for _, file := range files {
-		by, err := ioutil.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		if err = src.ApplyContent(file, string(by)); err != nil {
-			return nil, err
-		}
 	}
 
 	meshsrc := meshcfg.NewInmemory()
@@ -71,4 +62,38 @@ func AnalyzeFiles(domainSuffix string, cancel chan struct{}, files ...string) (d
 	}
 
 	return nil, errors.New("cancelled")
+}
+
+func GetFileBasedSource(m *schema.Metadata, files []string) (event.Source, error) {
+	src := inmemory.NewKubeSource(m.KubeSource().Resources())
+	for _, file := range files {
+		by, err := ioutil.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		if err = src.ApplyContent(file, string(by)); err != nil {
+			return nil, err
+		}
+	}
+
+	return src, nil
+}
+
+func GetKubeBasedSource(m *schema.Metadata, kubeconfig string) (
+	src event.Source, err error) {
+	resources := m.KubeSource().Resources()
+
+	var k kube.Interfaces
+	if k, err = client.NewKubeFromConfigFile(kubeconfig); err != nil {
+		return
+	}
+
+	o := apiserver.Options{
+		Client:    k,
+		Resources: resources,
+	}
+	s := apiserver.New(o)
+	src = s
+
+	return
 }

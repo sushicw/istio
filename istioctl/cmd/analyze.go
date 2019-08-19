@@ -19,16 +19,28 @@ import (
 	"path/filepath"
 
 	"istio.io/istio/galley/pkg/config/analysis/local"
+	"istio.io/istio/galley/pkg/config/event"
+	"istio.io/istio/galley/pkg/config/processor/metadata"
 
 	"github.com/spf13/cobra"
 )
 
+var (
+	useKube bool
+)
+
 // Analyze command
 func Analyze() *cobra.Command {
-	return &cobra.Command{
-		Use:     "analyze",
-		Short:   "Analyze Istio configuration",
-		Example: `istioctl experimental analyze <file|globpattern>...`,
+	analysisCmd := &cobra.Command{
+		Use:   "analyze <file|globpattern>...",
+		Short: "Analyze Istio configuration",
+		Example: `
+# Analyze yaml files
+istioctl experimental analyze a.yaml b.yaml
+
+# Analyze the current live cluster
+istioctl experimental analyze -k -c $HOME/.kube/config
+`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			files, err := gatherFiles(args)
@@ -36,7 +48,21 @@ func Analyze() *cobra.Command {
 				return err
 			}
 			cancel := make(chan struct{})
-			messages, err := local.AnalyzeFiles("svc.local", cancel, files...)
+
+			m := metadata.MustGet()
+
+			// TODO: Allow combining kube & file-based instead of making it either/or
+			var src event.Source
+			if useKube {
+				src, err = local.GetKubeBasedSource(m, kubeconfig)
+			} else {
+				src, err = local.GetFileBasedSource(m, files)
+			}
+			if err != nil {
+				return err
+			}
+
+			messages, err := local.AnalyzeSource(m, "svc.local", src, cancel)
 			if err != nil {
 				return err
 			}
@@ -48,6 +74,11 @@ func Analyze() *cobra.Command {
 			return nil
 		},
 	}
+
+	analysisCmd.PersistentFlags().BoolVarP(&useKube, "use-kube", "k", false,
+		"Use live kubernetes cluster for analysis")
+
+	return analysisCmd
 }
 
 func gatherFiles(args []string) ([]string, error) {
