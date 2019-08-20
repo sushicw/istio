@@ -65,9 +65,9 @@ istioctl experimental analyze -k -c $HOME/.kube/config a.yaml b.yaml
 				sources = append(sources, src)
 			}
 
-			// If files are provided, treat them as additional sources, in ascending priority order (later specified files take precedence)
-			for _, file := range files {
-				src, err := local.GetFileBasedSource(m, file)
+			// If files are provided, treat them (collectively) as a source.
+			if len(files) > 0 {
+				src, err := local.GetFileBasedSource(m, files...)
 				if err != nil {
 					return err
 				}

@@ -35,7 +35,6 @@ import (
 )
 
 // AnalyzeSource handles local analysis of an event source (e.g. file based, k8s based, or combined)
-// TODO: What do I need to do to properly handle domainSuffix?
 func AnalyzeSource(m *schema.Metadata, domainSuffix string, src event.Source, cancel chan struct{}) (diag.Messages, error) {
 	o := log.DefaultOptions()
 	o.SetOutputLevel("processing", log.ErrorLevel)
