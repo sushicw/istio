@@ -15,11 +15,10 @@
 package priority
 
 import (
-	"fmt"
 	"sync"
 
+	"istio.io/istio/galley/pkg/config/collection"
 	"istio.io/istio/galley/pkg/config/event"
-	"istio.io/istio/galley/pkg/config/resource"
 	"istio.io/pkg/log"
 )
 
@@ -31,9 +30,10 @@ type Source struct {
 	mu      sync.Mutex
 	started bool
 
-	inputs  []event.Source
-	handler event.Handler
-	ep      map[string]int
+	inputs          []event.Source
+	handler         event.Handler
+	eventPriorities map[string]int
+	fullSyncCounts  map[collection.Name]int
 }
 
 type priorityHandler struct {
@@ -43,43 +43,61 @@ type priorityHandler struct {
 
 var _ event.Source = &Source{}
 
+var (
+	discardHandler = event.SentinelHandler()
+)
+
 // New returns a new priority source, based on given input sources.
 func New(sources ...event.Source) *Source {
 	return &Source{
-		inputs: sources,
-		ep:     make(map[string]int),
+		inputs:          sources,
+		eventPriorities: make(map[string]int),
+		fullSyncCounts:  make(map[collection.Name]int),
 	}
 }
 
 // Handle implements event.Handler
-// For each event, only pass it along to the downstream handler if the source it came from had equal or higher priority
-//TODO: Still something nondeterministic to hammer out
 func (ph *priorityHandler) Handle(e event.Event) {
-	//TODO: Leaving this in causes everything to hang when using files as a source (but not Kube?)
-	// ph.src.mu.Lock()
-	// defer ph.src.mu.Unlock()
-
-	key := getEventKey(e)
-
-	curPriority, ok := ph.src.ep[key]
-	log.Errorf("DEBUG0a: %v %s %d %t %d %t", e, key, ph.priority, ok, curPriority, (!ok || ph.priority >= curPriority))
-	if !ok || ph.priority >= curPriority {
-		ph.src.ep[key] = ph.priority
-		ph.src.handler.Handle(e)
+	if e.Kind == event.FullSync {
+		ph.handleFullSync(e)
 	} else {
+		ph.handleEvent(e)
 	}
 }
 
-func getEventKey(e event.Event) string {
-	var entryName resource.Name
-	if e.Kind == event.FullSync {
-		// e.Entry isn't defined for FullSync events, so we use this instead
-		entryName = resource.NewName("", "FullSync")
-	} else {
-		entryName = e.Entry.Metadata.Name
-	}
+// handleFullSync handles FullSync events, which are a special case.
+// For each collection, we want to only send this once, after all upstream sources have sent theirs.
+func (ph *priorityHandler) handleFullSync(e event.Event) {
+	// TODO: fix me
+	// ph.src.mu.Lock()
+	// defer ph.src.mu.Unlock()
 
-	return fmt.Sprintf("%s/%s", e.Source, entryName)
+	ph.src.fullSyncCounts[e.Source]++
+	log.Errorf("DEBUG1a: %v %d %d", e, ph.src.fullSyncCounts[e.Source], len(ph.src.inputs))
+	if ph.src.fullSyncCounts[e.Source] == len(ph.src.inputs) {
+		ph.src.handler.Handle(e)
+	} else {
+		discardHandler.Handle(e)
+	}
+}
+
+// handleEvent handles non fullsync events.
+// For each event, only pass it along to the downstream handler if the source it came from had equal or higher priority
+func (ph *priorityHandler) handleEvent(e event.Event) {
+	// TODO: fix me
+	// ph.src.mu.Lock()
+	// defer ph.src.mu.Unlock()
+
+	key := e.String()
+
+	curPriority, ok := ph.src.eventPriorities[key]
+	log.Errorf("DEBUG0a: %v %d %t %d %t", e, ph.priority, ok, curPriority, (!ok || ph.priority >= curPriority))
+	if !ok || ph.priority >= curPriority {
+		ph.src.eventPriorities[key] = ph.priority
+		ph.src.handler.Handle(e)
+	} else {
+		discardHandler.Handle(e)
+	}
 }
 
 // Dispatch implements event.Source
