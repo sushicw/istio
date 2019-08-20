@@ -64,7 +64,7 @@ func AnalyzeSource(m *schema.Metadata, domainSuffix string, src event.Source, ca
 	return nil, errors.New("cancelled")
 }
 
-func GetFileBasedSource(m *schema.Metadata, files []string) (event.Source, error) {
+func GetFileBasedSource(m *schema.Metadata, files ...string) (event.Source, error) {
 	src := inmemory.NewKubeSource(m.KubeSource().Resources())
 	for _, file := range files {
 		by, err := ioutil.ReadFile(file)

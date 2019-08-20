@@ -41,6 +41,9 @@ istioctl experimental analyze a.yaml b.yaml
 
 # Analyze the current live cluster
 istioctl experimental analyze -k -c $HOME/.kube/config
+
+# Analyze the current live cluster, simulating the effect of applying additional yaml files
+istioctl experimental analyze -k -c $HOME/.kube/config a.yaml b.yaml
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
@@ -62,10 +65,9 @@ istioctl experimental analyze -k -c $HOME/.kube/config
 				sources = append(sources, src)
 			}
 
-			// If files are provided, treat them (collectively) as a single source.
-			// TODO: Should we instead treat each file as a separate source, so any inter-file collisions are handled in priority order?
-			if len(files) > 0 {
-				src, err := local.GetFileBasedSource(m, files)
+			// If files are provided, treat them as additional sources, in ascending priority order (later specified files take precedence)
+			for _, file := range files {
+				src, err := local.GetFileBasedSource(m, file)
 				if err != nil {
 					return err
 				}
