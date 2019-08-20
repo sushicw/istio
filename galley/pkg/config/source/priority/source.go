@@ -19,19 +19,18 @@ import (
 
 	"istio.io/istio/galley/pkg/config/collection"
 	"istio.io/istio/galley/pkg/config/event"
-	"istio.io/pkg/log"
 )
 
 // Source is a processor.Source implementation that combines multiple sources in priority order
-// Such that sources later in the list take priority of sources earlier in the list
-//TODO: Move this elsewhere / rename?
-//TODO: Refactor? prorityHandler having a pointer to src seems particularly ugly
+// Such that sources later in the input list take priority over sources earlier in the list
 type Source struct {
 	mu      sync.Mutex
 	started bool
 
-	inputs          []event.Source
-	handler         event.Handler
+	inputs  []event.Source
+	handler event.Handler
+
+	eventStateMu    sync.Mutex
 	eventPriorities map[string]int
 	fullSyncCounts  map[collection.Name]int
 }
@@ -58,6 +57,9 @@ func New(sources ...event.Source) *Source {
 
 // Handle implements event.Handler
 func (ph *priorityHandler) Handle(e event.Event) {
+	ph.src.eventStateMu.Lock()
+	defer ph.src.eventStateMu.Unlock()
+
 	if e.Kind == event.FullSync {
 		ph.handleFullSync(e)
 	} else {
@@ -68,12 +70,7 @@ func (ph *priorityHandler) Handle(e event.Event) {
 // handleFullSync handles FullSync events, which are a special case.
 // For each collection, we want to only send this once, after all upstream sources have sent theirs.
 func (ph *priorityHandler) handleFullSync(e event.Event) {
-	// TODO: fix me
-	// ph.src.mu.Lock()
-	// defer ph.src.mu.Unlock()
-
 	ph.src.fullSyncCounts[e.Source]++
-	log.Errorf("DEBUG1a: %v %d %d", e, ph.src.fullSyncCounts[e.Source], len(ph.src.inputs))
 	if ph.src.fullSyncCounts[e.Source] == len(ph.src.inputs) {
 		ph.src.handler.Handle(e)
 	} else {
@@ -84,16 +81,9 @@ func (ph *priorityHandler) handleFullSync(e event.Event) {
 // handleEvent handles non fullsync events.
 // For each event, only pass it along to the downstream handler if the source it came from had equal or higher priority
 func (ph *priorityHandler) handleEvent(e event.Event) {
-	// TODO: fix me
-	// ph.src.mu.Lock()
-	// defer ph.src.mu.Unlock()
-
-	key := e.String()
-
-	curPriority, ok := ph.src.eventPriorities[key]
-	log.Errorf("DEBUG0a: %v %d %t %d %t", e, ph.priority, ok, curPriority, (!ok || ph.priority >= curPriority))
+	curPriority, ok := ph.src.eventPriorities[e.String()]
 	if !ok || ph.priority >= curPriority {
-		ph.src.eventPriorities[key] = ph.priority
+		ph.src.eventPriorities[e.String()] = ph.priority
 		ph.src.handler.Handle(e)
 	} else {
 		discardHandler.Handle(e)
