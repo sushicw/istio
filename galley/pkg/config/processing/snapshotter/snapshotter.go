@@ -16,6 +16,7 @@ package snapshotter
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"istio.io/istio/galley/pkg/config/collection"
@@ -27,10 +28,11 @@ import (
 
 // Snapshotter is a processor that handles input events and creates snapshotImpl collections.
 type Snapshotter struct {
-	accumulators map[collection.Name]*accumulator
-	selector     event.Router
-	xforms       []event.Transformer
-	settings     []SnapshotOptions
+	accumulators      map[collection.Name]*accumulator
+	selector          event.Router
+	xforms            []event.Transformer
+	settings          []SnapshotOptions
+	groupSyncCounters []*groupSyncCounter
 
 	// lastEventTime records the last time an event was received.
 	lastEventTime time.Time
@@ -48,10 +50,22 @@ var _ event.Processor = &Snapshotter{}
 type HandlerFn func(*collection.Set)
 
 type accumulator struct {
-	reqSyncCount int
-	syncCount    int
-	collection   *collection.Instance
-	strategies   []strategy.Instance
+	reqSyncCount     int
+	syncCount        int
+	groupSyncCounter *groupSyncCounter
+	collection       *collection.Instance
+	strategies       []strategy.Instance
+}
+
+// groupSyncCounter keeps track of the collections in a snapshot group that have been fully synced,
+// as well as how many are still remaining
+// We want to allow all collections in the group to have at least received a FullSync before allowing
+// a snapshot to get published, so we keep track of which per-collection accumulators have already
+// received a FullSync event and how many more we're expecting.
+type groupSyncCounter struct {
+	mu        sync.Mutex
+	remaining int
+	synced    map[*collection.Instance]bool
 }
 
 // Handle implements event.Handler
@@ -69,7 +83,17 @@ func (a *accumulator) Handle(e event.Event) {
 		panic(fmt.Errorf("accumulator.Handle: unhandled event type: %v", e.Kind))
 	}
 
-	if a.syncCount >= a.reqSyncCount {
+	// Update the group sync counter if we received all required FullSync events for a collection
+	gsc := a.groupSyncCounter
+	gsc.mu.Lock()
+	defer gsc.mu.Unlock()
+	if a.syncCount >= a.reqSyncCount && !gsc.synced[a.collection] {
+		gsc.remaining--
+		gsc.synced[a.collection] = true
+	}
+
+	// proceed with triggering the strategy OnChange only after we've full synced every collection in this group.
+	if gsc.remaining == 0 {
 		for _, s := range a.strategies {
 			s.OnChange()
 		}
@@ -110,6 +134,9 @@ func NewSnapshotter(xforms []event.Transformer, settings []SnapshotOptions) (*Sn
 	}
 
 	for _, o := range settings {
+		gsc := newGroupSyncCounter(len(o.Collections))
+		s.groupSyncCounters = append(s.groupSyncCounters, gsc)
+
 		for _, c := range o.Collections {
 			a := s.accumulators[c]
 			if a == nil {
@@ -117,10 +144,18 @@ func NewSnapshotter(xforms []event.Transformer, settings []SnapshotOptions) (*Sn
 			}
 
 			a.strategies = append(a.strategies, o.Strategy)
+			a.groupSyncCounter = gsc
 		}
 	}
 
 	return s, nil
+}
+
+func newGroupSyncCounter(size int) *groupSyncCounter {
+	return &groupSyncCounter{
+		synced:    make(map[*collection.Instance]bool),
+		remaining: size,
+	}
 }
 
 // Start implements Processor
@@ -160,8 +195,9 @@ func (s *Snapshotter) publish(o SnapshotOptions) {
 
 // Stop implements Processor
 func (s *Snapshotter) Stop() {
-	for _, o := range s.settings {
+	for i, o := range s.settings {
 		o.Strategy.Stop()
+		s.groupSyncCounters[i] = newGroupSyncCounter(len(o.Collections))
 	}
 
 	for _, x := range s.xforms {

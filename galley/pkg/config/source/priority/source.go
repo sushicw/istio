@@ -22,7 +22,8 @@ import (
 )
 
 // Source is a processor.Source implementation that combines multiple sources in priority order
-// Such that sources later in the input list take priority over sources earlier in the list
+// Such that events from sources later in the input list take priority over events affecting
+// the same resource from sources earlier in the list
 type Source struct {
 	mu      sync.Mutex
 	started bool
