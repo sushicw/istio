@@ -43,10 +43,6 @@ type priorityHandler struct {
 
 var _ event.Source = &Source{}
 
-var (
-	discardHandler = event.SentinelHandler()
-)
-
 // New returns a new priority source, based on given input sources.
 func New(sources ...event.Source) *Source {
 	return &Source{
@@ -72,23 +68,21 @@ func (ph *priorityHandler) Handle(e event.Event) {
 // For each collection, we want to only send this once, after all upstream sources have sent theirs.
 func (ph *priorityHandler) handleFullSync(e event.Event) {
 	ph.src.fullSyncCounts[e.Source]++
-	if ph.src.fullSyncCounts[e.Source] == len(ph.src.inputs) {
-		ph.src.handler.Handle(e)
-	} else {
-		discardHandler.Handle(e)
+	if ph.src.fullSyncCounts[e.Source] != len(ph.src.inputs) {
+		return
 	}
+	ph.src.handler.Handle(e)
 }
 
 // handleEvent handles non fullsync events.
 // For each event, only pass it along to the downstream handler if the source it came from had equal or higher priority
 func (ph *priorityHandler) handleEvent(e event.Event) {
 	curPriority, ok := ph.src.eventPriorities[e.String()]
-	if !ok || ph.priority >= curPriority {
-		ph.src.eventPriorities[e.String()] = ph.priority
-		ph.src.handler.Handle(e)
-	} else {
-		discardHandler.Handle(e)
+	if ok && ph.priority < curPriority {
+		return
 	}
+	ph.src.eventPriorities[e.String()] = ph.priority
+	ph.src.handler.Handle(e)
 }
 
 // Dispatch implements event.Source
@@ -99,6 +93,7 @@ func (s *Source) Dispatch(h event.Handler) {
 	s.handler = h
 
 	// Inject a PriorityHandler for each source
+	// Priority is based on index position (higher index, higher priority)
 	for i, input := range s.inputs {
 		ph := &priorityHandler{
 			priority: i,
