@@ -12,61 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package priority
+package local
 
 import (
+	"fmt"
 	"sync"
 
 	"istio.io/istio/galley/pkg/config/collection"
 	"istio.io/istio/galley/pkg/config/event"
 )
 
-// Source is a processor.Source implementation that combines multiple sources in priority order
-// Such that events from sources later in the input list take priority over events affecting
+// precedenceSource is a processor.Source implementation that combines multiple sources in precedence order
+// Such that events from sources later in the input list take precedence over events affecting
 // the same resource from sources earlier in the list
-type Source struct {
+// Only events from the highest precedence source so far are allowed through.
+type precedenceSource struct {
 	mu      sync.Mutex
 	started bool
 
 	inputs  []event.Source
 	handler event.Handler
 
-	eventStateMu    sync.Mutex
-	eventPriorities map[string]int
-	fullSyncCounts  map[collection.Name]int
+	eventStateMu     sync.Mutex
+	resourcePriority map[string]int
+	fullSyncCounts   map[collection.Name]int
 }
 
-type priorityHandler struct {
-	priority int
-	src      *Source
+type precedenceHandler struct {
+	precedence int
+	src        *precedenceSource
 }
 
-var _ event.Source = &Source{}
+var _ event.Source = &precedenceSource{}
 
-// New returns a new priority source, based on given input sources.
-func New(sources ...event.Source) *Source {
-	return &Source{
-		inputs:          sources,
-		eventPriorities: make(map[string]int),
-		fullSyncCounts:  make(map[collection.Name]int),
+func newPrecedenceSource(sources []event.Source) *precedenceSource {
+	return &precedenceSource{
+		inputs:           sources,
+		resourcePriority: make(map[string]int),
+		fullSyncCounts:   make(map[collection.Name]int),
 	}
 }
 
 // Handle implements event.Handler
-func (ph *priorityHandler) Handle(e event.Event) {
+func (ph *precedenceHandler) Handle(e event.Event) {
 	ph.src.eventStateMu.Lock()
 	defer ph.src.eventStateMu.Unlock()
 
-	if e.Kind == event.FullSync {
-		ph.handleFullSync(e)
-	} else {
+	switch e.Kind {
+	case event.Added, event.Updated, event.Deleted:
 		ph.handleEvent(e)
+	case event.FullSync:
+		ph.handleFullSync(e)
+	default:
+		ph.src.handler.Handle(e)
 	}
 }
 
 // handleFullSync handles FullSync events, which are a special case.
 // For each collection, we want to only send this once, after all upstream sources have sent theirs.
-func (ph *priorityHandler) handleFullSync(e event.Event) {
+func (ph *precedenceHandler) handleFullSync(e event.Event) {
 	ph.src.fullSyncCounts[e.Source]++
 	if ph.src.fullSyncCounts[e.Source] != len(ph.src.inputs) {
 		return
@@ -75,36 +79,38 @@ func (ph *priorityHandler) handleFullSync(e event.Event) {
 }
 
 // handleEvent handles non fullsync events.
-// For each event, only pass it along to the downstream handler if the source it came from had equal or higher priority
-func (ph *priorityHandler) handleEvent(e event.Event) {
-	curPriority, ok := ph.src.eventPriorities[e.String()]
-	if ok && ph.priority < curPriority {
+// For each event, only pass it along to the downstream handler if the source it came from
+// had equal or higher precedence on the current resource
+func (ph *precedenceHandler) handleEvent(e event.Event) {
+	key := fmt.Sprintf("%s/%s/%s", e.Kind, e.Source, e.Entry.Metadata.Name)
+	curPrecedence, ok := ph.src.resourcePriority[key]
+	if ok && ph.precedence < curPrecedence {
 		return
 	}
-	ph.src.eventPriorities[e.String()] = ph.priority
+	ph.src.resourcePriority[key] = ph.precedence
 	ph.src.handler.Handle(e)
 }
 
 // Dispatch implements event.Source
-func (s *Source) Dispatch(h event.Handler) {
+func (s *precedenceSource) Dispatch(h event.Handler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.handler = h
 
-	// Inject a PriorityHandler for each source
-	// Priority is based on index position (higher index, higher priority)
+	// Inject a precedenceHandler for each source
+	// precedence is based on index position (higher index, higher precedence)
 	for i, input := range s.inputs {
-		ph := &priorityHandler{
-			priority: i,
-			src:      s,
+		ph := &precedenceHandler{
+			precedence: i,
+			src:        s,
 		}
 		input.Dispatch(ph)
 	}
 }
 
 // Start implements processor.Source
-func (s *Source) Start() {
+func (s *precedenceSource) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -120,7 +126,7 @@ func (s *Source) Start() {
 }
 
 // Stop implements processor.Source
-func (s *Source) Stop() {
+func (s *precedenceSource) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

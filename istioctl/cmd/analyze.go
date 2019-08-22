@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"istio.io/istio/galley/pkg/config/analysis/analyzers"
 	"istio.io/istio/galley/pkg/config/analysis/local"
-	"istio.io/istio/galley/pkg/config/event"
 	"istio.io/istio/galley/pkg/config/processor/metadata"
-	"istio.io/istio/galley/pkg/config/source/priority"
+	"istio.io/pkg/log"
 
 	"github.com/spf13/cobra"
 )
@@ -46,6 +46,9 @@ istioctl experimental analyze -k -c $HOME/.kube/config
 istioctl experimental analyze -k -c $HOME/.kube/config a.yaml b.yaml
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			loggingOptions.SetOutputLevel("processing", log.ErrorLevel)
+			loggingOptions.SetOutputLevel("source", log.ErrorLevel)
+			log.Configure(loggingOptions)
 
 			files, err := gatherFiles(args)
 			if err != nil {
@@ -53,34 +56,25 @@ istioctl experimental analyze -k -c $HOME/.kube/config a.yaml b.yaml
 			}
 			cancel := make(chan struct{})
 
-			m := metadata.MustGet()
+			sa := local.NewSourceAnalyzer(metadata.MustGet(), "svc.local", analyzers.All())
 
 			// If we're using kube, use that as a base source.
-			var sources = make([]event.Source, 0)
 			if useKube {
-				src, err := local.GetKubeBasedSource(m, kubeconfig)
+				err := sa.AddKubeBasedSource(kubeconfig)
 				if err != nil {
 					return err
 				}
-				sources = append(sources, src)
 			}
 
 			// If files are provided, treat them (collectively) as a source.
 			if len(files) > 0 {
-				src, err := local.GetFileBasedSource(m, files...)
+				err := sa.AddFileBasedSource(files)
 				if err != nil {
 					return err
 				}
-				sources = append(sources, src)
 			}
 
-			if len(sources) == 0 {
-				return fmt.Errorf("At least one file and/or kubernetes source must be provided")
-			}
-
-			src := priority.New(sources...)
-
-			messages, err := local.AnalyzeSource(m, "svc.local", src, cancel)
+			messages, err := sa.Analyze(cancel)
 			if err != nil {
 				return err
 			}
