@@ -16,7 +16,6 @@ package snapshotter
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"istio.io/istio/galley/pkg/config/collection"
@@ -28,11 +27,11 @@ import (
 
 // Snapshotter is a processor that handles input events and creates snapshotImpl collections.
 type Snapshotter struct {
-	accumulators      map[collection.Name]*accumulator
-	selector          event.Router
-	xforms            []event.Transformer
-	settings          []SnapshotOptions
-	groupSyncCounters []*groupSyncCounter
+	accumulators   map[collection.Name]*accumulator
+	selector       event.Router
+	xforms         []event.Transformer
+	settings       []SnapshotOptions
+	snapshotGroups []*snapshotGroup
 
 	// lastEventTime records the last time an event was received.
 	lastEventTime time.Time
@@ -50,22 +49,22 @@ var _ event.Processor = &Snapshotter{}
 type HandlerFn func(*collection.Set)
 
 type accumulator struct {
-	reqSyncCount     int
-	syncCount        int
-	groupSyncCounter *groupSyncCounter
-	collection       *collection.Instance
-	strategies       []strategy.Instance
+	reqSyncCount   int
+	syncCount      int
+	collection     *collection.Instance
+	snapshotGroups []*snapshotGroup
 }
 
-// groupSyncCounter keeps track of the collections in a snapshot group that have been fully synced,
-// as well as how many are still remaining
-// We want to allow all collections in the group to have at least received a FullSync before allowing
-// a snapshot to get published, so we keep track of which per-collection accumulators have already
-// received a FullSync event and how many more we're expecting.
-type groupSyncCounter struct {
-	mu        sync.Mutex
+// snapshotGroup represents a group of collections that all need to be synced before any of them publish events,
+// and also share a set of strategies.
+// Members of a snapshot group are defined via the per-collection accumulators that point to a group.
+type snapshotGroup struct {
+	// How many collections in the current group still need to receive a FullSync before we start publishing.
 	remaining int
-	synced    map[*collection.Instance]bool
+	// Set of collections that have already received a FullSync. If we get a duplicate, it will be ignored.
+	synced map[*collection.Instance]bool
+	// Strategy to execute on handled events only after all collections in the group have been synced.
+	strategy strategy.Instance
 }
 
 // Handle implements event.Handler
@@ -84,18 +83,15 @@ func (a *accumulator) Handle(e event.Event) {
 	}
 
 	// Update the group sync counter if we received all required FullSync events for a collection
-	gsc := a.groupSyncCounter
-	gsc.mu.Lock()
-	defer gsc.mu.Unlock()
-	if a.syncCount >= a.reqSyncCount && !gsc.synced[a.collection] {
-		gsc.remaining--
-		gsc.synced[a.collection] = true
-	}
+	for _, sg := range a.snapshotGroups {
+		if a.syncCount >= a.reqSyncCount && !sg.synced[a.collection] {
+			sg.remaining--
+			sg.synced[a.collection] = true
+		}
 
-	// proceed with triggering the strategy OnChange only after we've full synced every collection in this group.
-	if gsc.remaining == 0 {
-		for _, s := range a.strategies {
-			s.OnChange()
+		// proceed with triggering the strategy OnChange only after we've full synced every collection in a group.
+		if sg.remaining == 0 {
+			sg.strategy.OnChange()
 		}
 	}
 }
@@ -134,28 +130,32 @@ func NewSnapshotter(xforms []event.Transformer, settings []SnapshotOptions) (*Sn
 	}
 
 	for _, o := range settings {
-		gsc := newGroupSyncCounter(len(o.Collections))
-		s.groupSyncCounters = append(s.groupSyncCounters, gsc)
-
+		sg := newSnapshotGroup(len(o.Collections), o.Strategy)
+		s.snapshotGroups = append(s.snapshotGroups, sg)
 		for _, c := range o.Collections {
 			a := s.accumulators[c]
 			if a == nil {
 				return nil, fmt.Errorf("unrecognized collection in SnapshotOptions: %v (Group: %s)", c, o.Group)
 			}
 
-			a.strategies = append(a.strategies, o.Strategy)
-			a.groupSyncCounter = gsc
+			a.snapshotGroups = append(a.snapshotGroups, sg)
 		}
 	}
 
 	return s, nil
 }
 
-func newGroupSyncCounter(size int) *groupSyncCounter {
-	return &groupSyncCounter{
-		synced:    make(map[*collection.Instance]bool),
-		remaining: size,
+func newSnapshotGroup(size int, strategy strategy.Instance) *snapshotGroup {
+	sg := &snapshotGroup{
+		strategy: strategy,
 	}
+	sg.reset(size)
+	return sg
+}
+
+func (sg *snapshotGroup) reset(size int) {
+	sg.remaining = size
+	sg.synced = make(map[*collection.Instance]bool)
 }
 
 // Start implements Processor
@@ -197,7 +197,7 @@ func (s *Snapshotter) publish(o SnapshotOptions) {
 func (s *Snapshotter) Stop() {
 	for i, o := range s.settings {
 		o.Strategy.Stop()
-		s.groupSyncCounters[i] = newGroupSyncCounter(len(o.Collections))
+		s.snapshotGroups[i].reset(len(o.Collections))
 	}
 
 	for _, x := range s.xforms {
