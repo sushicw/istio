@@ -34,7 +34,7 @@ var (
 func Analyze() *cobra.Command {
 	analysisCmd := &cobra.Command{
 		Use:   "analyze <file|globpattern>...",
-		Short: "Analyze Istio configuration",
+		Short: "Analyze Istio configuration and print validation messages",
 		Example: `
 # Analyze yaml files
 istioctl experimental analyze a.yaml b.yaml
