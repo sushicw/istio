@@ -86,10 +86,14 @@ import (
 //
 // {{.Description}}
 func {{.FuncName}}(entry *resource.Entry{{range .Args}}, {{.Name}} {{.Type}}{{end}}) diag.Message {
+	var o resource.Origin
+	if entry != nil {
+		o = entry.Origin
+	}
 	return diag.NewMessage(
 		diag.{{.Level}},
 		diag.Code({{.Code}}),
-		entry.Origin,
+		o,
 		"{{.Template}}",{{range .Args}}
 		{{.Name}},
 {{end}}	)
