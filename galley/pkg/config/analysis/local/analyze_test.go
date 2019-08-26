@@ -63,7 +63,7 @@ func TestAnalyzersRun(t *testing.T) {
 	msg := msg.InternalError(r, "msg")
 	a := &testAnalyzer{
 		fn: func(ctx analysis.Context) {
-			ctx.Report(collection.NewName("collection"), r, msg)
+			ctx.Report(collection.NewName("collection"), msg)
 		},
 	}
 
