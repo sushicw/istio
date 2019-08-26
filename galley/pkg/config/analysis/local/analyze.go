@@ -20,7 +20,6 @@ import (
 	"io/ioutil"
 
 	"istio.io/istio/galley/pkg/config/analysis"
-	"istio.io/istio/galley/pkg/config/analysis/analyzers"
 	"istio.io/istio/galley/pkg/config/analysis/diag"
 	"istio.io/istio/galley/pkg/config/event"
 	"istio.io/istio/galley/pkg/config/meshcfg"
@@ -32,27 +31,27 @@ import (
 	"istio.io/istio/galley/pkg/source/kube/client"
 )
 
+const domainSuffix = "svc.local"
+
 // SourceAnalyzer handles local analysis of k8s and file based event sources
 type SourceAnalyzer struct {
-	m            *schema.Metadata
-	domainSuffix string
-	sources      []event.Source
-	analyzer     analysis.Analyzer
+	m        *schema.Metadata
+	sources  []event.Source
+	analyzer analysis.Analyzer
 }
 
-// NewSourceAnalyzer creates a new SourceAnalyzer with no sources. Use the Add*Source methods to add sources in ascending precedence order.
-func NewSourceAnalyzer(m *schema.Metadata, domainSuffix string, analyzer analysis.Analyzer) *SourceAnalyzer {
+// NewSourceAnalyzer creates a new SourceAnalyzer with no sources. Use the Add*Source methods to add sources in ascending precedence order,
+// then execute Analyze to perform the analysis
+func NewSourceAnalyzer(m *schema.Metadata, analyzer analysis.Analyzer) *SourceAnalyzer {
 	return &SourceAnalyzer{
-		m:            m,
-		domainSuffix: domainSuffix,
-		sources:      make([]event.Source, 0),
-		analyzer:     analyzer,
+		m:        m,
+		sources:  make([]event.Source, 0),
+		analyzer: analyzer,
 	}
 }
 
 // Analyze loads the sources and executes the analysis
 func (sa *SourceAnalyzer) Analyze(cancel chan struct{}) (diag.Messages, error) {
-
 	meshsrc := meshcfg.NewInmemory()
 	meshsrc.Set(meshcfg.Default())
 
@@ -62,8 +61,8 @@ func (sa *SourceAnalyzer) Analyze(cancel chan struct{}) (diag.Messages, error) {
 	src := newPrecedenceSource(sa.sources)
 
 	updater := &snapshotter.InMemoryStatusUpdater{}
-	distributor := snapshotter.NewAnalyzingDistributor(updater, analyzers.All(), snapshotter.NewInMemoryDistributor())
-	rt, err := processor.Initialize(sa.m, sa.domainSuffix, event.CombineSources(src, meshsrc), distributor)
+	distributor := snapshotter.NewAnalyzingDistributor(updater, sa.analyzer, snapshotter.NewInMemoryDistributor())
+	rt, err := processor.Initialize(sa.m, domainSuffix, event.CombineSources(src, meshsrc), distributor)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +76,8 @@ func (sa *SourceAnalyzer) Analyze(cancel chan struct{}) (diag.Messages, error) {
 	return nil, errors.New("cancelled")
 }
 
-func (sa *SourceAnalyzer) AddFileBasedSource(files []string) error {
+// AddFileKubeSource adds a source based on the specified k8s yaml files to the current SourceAnalyzer
+func (sa *SourceAnalyzer) AddFileKubeSource(files []string) error {
 	src := inmemory.NewKubeSource(sa.m.KubeSource().Resources())
 
 	for _, file := range files {
@@ -94,12 +94,8 @@ func (sa *SourceAnalyzer) AddFileBasedSource(files []string) error {
 	return nil
 }
 
-func (sa *SourceAnalyzer) AddKubeBasedSource(kubeconfig string) error {
-	k, err := client.NewKubeFromConfigFile(kubeconfig)
-	if err != nil {
-		return err
-	}
-
+// AddRunningKubeSource adds a source based on a running k8s cluster to the current SourceAnalyzer
+func (sa *SourceAnalyzer) AddRunningKubeSource(k client.Interfaces) {
 	o := apiserver.Options{
 		Client:    k,
 		Resources: sa.m.KubeSource().Resources(),
@@ -107,5 +103,4 @@ func (sa *SourceAnalyzer) AddKubeBasedSource(kubeconfig string) error {
 	src := apiserver.New(o)
 
 	sa.sources = append(sa.sources, src)
-	return nil
 }

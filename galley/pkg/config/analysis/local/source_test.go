@@ -1,14 +1,24 @@
+// Copyright 2019 Istio Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package local
 
 import (
 	"testing"
 
-	"github.com/gogo/protobuf/types"
 	. "github.com/onsi/gomega"
 
 	"istio.io/istio/galley/pkg/config/event"
-	"istio.io/istio/galley/pkg/config/resource"
-	"istio.io/istio/galley/pkg/config/testing/data"
 	"istio.io/istio/galley/pkg/config/testing/fixtures"
 )
 
@@ -84,22 +94,4 @@ func TestPrecedence(t *testing.T) {
 	// For a higher precedence source, e2 should get handled
 	s3.Handle(e2)
 	g.Expect(h.Events()).To(Equal([]event.Event{e1, e2}))
-}
-
-func createTestEvent(k event.Kind, r *resource.Entry) event.Event {
-	return event.Event{
-		Kind:   k,
-		Source: data.Collection1,
-		Entry:  r,
-	}
-}
-
-func createTestResource(name, version string) *resource.Entry {
-	return &resource.Entry{
-		Metadata: resource.Metadata{
-			Name:    resource.NewName("ns", name),
-			Version: resource.Version(version),
-		},
-		Item: &types.Empty{},
-	}
 }

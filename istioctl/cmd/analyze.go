@@ -21,6 +21,7 @@ import (
 	"istio.io/istio/galley/pkg/config/analysis/analyzers"
 	"istio.io/istio/galley/pkg/config/analysis/local"
 	"istio.io/istio/galley/pkg/config/processor/metadata"
+	"istio.io/istio/galley/pkg/source/kube/client"
 	"istio.io/pkg/log"
 
 	"github.com/spf13/cobra"
@@ -56,19 +57,20 @@ istioctl experimental analyze -k -c $HOME/.kube/config a.yaml b.yaml
 			}
 			cancel := make(chan struct{})
 
-			sa := local.NewSourceAnalyzer(metadata.MustGet(), "svc.local", analyzers.All())
+			sa := local.NewSourceAnalyzer(metadata.MustGet(), analyzers.All())
 
 			// If we're using kube, use that as a base source.
 			if useKube {
-				err := sa.AddKubeBasedSource(kubeconfig)
+				k, err := client.NewKubeFromConfigFile(kubeconfig)
 				if err != nil {
 					return err
 				}
+				sa.AddRunningKubeSource(k)
 			}
 
 			// If files are provided, treat them (collectively) as a source.
 			if len(files) > 0 {
-				err := sa.AddFileBasedSource(files)
+				err := sa.AddFileKubeSource(files)
 				if err != nil {
 					return err
 				}
