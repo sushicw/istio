@@ -86,19 +86,23 @@ import (
 //
 // {{.Description}}
 func {{.FuncName}}(entry *resource.Entry{{range .Args}}, {{.Name}} {{.Type}}{{end}}) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.{{.Level}},
 		diag.Code({{.Code}}),
-		o,
+		originOrNil(entry),
 		"{{.Template}}",{{range .Args}}
 		{{.Name}},
 {{end}}	)
 }
 {{end}}
+
+func originOrNil(e *resource.Entry) resource.Origin {
+	var o resource.Origin
+	if e != nil {
+		o = e.Origin
+	}
+	return o
+}
 `
 
 func generate(m *messages) (string, error) {

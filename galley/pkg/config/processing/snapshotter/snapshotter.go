@@ -84,14 +84,8 @@ func (a *accumulator) Handle(e event.Event) {
 
 	// Update the group sync counter if we received all required FullSync events for a collection
 	for _, sg := range a.snapshotGroups {
-		if a.syncCount >= a.reqSyncCount && !sg.synced[a.collection] {
-			sg.remaining--
-			sg.synced[a.collection] = true
-		}
-
-		// proceed with triggering the strategy OnChange only after we've full synced every collection in a group.
-		if sg.remaining == 0 {
-			sg.strategy.OnChange()
+		if a.syncCount >= a.reqSyncCount {
+			sg.onSync(a.collection)
 		}
 	}
 }
@@ -153,6 +147,18 @@ func newSnapshotGroup(size int, strategy strategy.Instance) *snapshotGroup {
 	return sg
 }
 
+func (sg *snapshotGroup) onSync(c *collection.Instance) {
+	if !sg.synced[c] {
+		sg.remaining--
+		sg.synced[c] = true
+	}
+
+	// proceed with triggering the strategy OnChange only after we've full synced every collection in a group.
+	if sg.remaining == 0 {
+		sg.strategy.OnChange()
+	}
+}
+
 func (sg *snapshotGroup) reset(size int) {
 	sg.remaining = size
 	sg.synced = make(map[*collection.Instance]bool)
@@ -195,9 +201,8 @@ func (s *Snapshotter) publish(o SnapshotOptions) {
 
 // Stop implements Processor
 func (s *Snapshotter) Stop() {
-	for i, o := range s.settings {
+	for _, o := range s.settings {
 		o.Strategy.Stop()
-		s.snapshotGroups[i].reset(len(o.Collections))
 	}
 
 	for _, x := range s.xforms {
@@ -206,6 +211,10 @@ func (s *Snapshotter) Stop() {
 
 	for _, a := range s.accumulators {
 		a.reset()
+	}
+
+	for i, o := range s.settings {
+		s.snapshotGroups[i].reset(len(o.Collections))
 	}
 }
 

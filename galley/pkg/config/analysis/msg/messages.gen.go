@@ -12,14 +12,10 @@ import (
 //
 // There was an internal error in the toolchain. This is almost always a bug in the implementation.
 func InternalError(entry *resource.Entry, detail string) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.Error,
 		diag.Code(1),
-		o,
+		originOrNil(entry),
 		"Internal error: %v",
 		detail,
 	)
@@ -29,14 +25,10 @@ func InternalError(entry *resource.Entry, detail string) diag.Message {
 //
 // A feature that the configuration is depending on is not implemented yet.
 func NotYetImplemented(entry *resource.Entry, detail string) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.Error,
 		diag.Code(2),
-		o,
+		originOrNil(entry),
 		"Not yet implemented: %s",
 		detail,
 	)
@@ -46,14 +38,10 @@ func NotYetImplemented(entry *resource.Entry, detail string) diag.Message {
 //
 // There was a parse error during the parsing of the configuration text
 func ParseError(entry *resource.Entry, detail string) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.Warning,
 		diag.Code(3),
-		o,
+		originOrNil(entry),
 		"Parse error: %s",
 		detail,
 	)
@@ -63,14 +51,10 @@ func ParseError(entry *resource.Entry, detail string) diag.Message {
 //
 // A feature that the configuration is depending on is now deprecated.
 func Deprecated(entry *resource.Entry, detail string) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.Warning,
 		diag.Code(4),
-		o,
+		originOrNil(entry),
 		"Deprecated: %s",
 		detail,
 	)
@@ -80,15 +64,19 @@ func Deprecated(entry *resource.Entry, detail string) diag.Message {
 //
 // The Gateway resource that the Virtual Service is referencing does not exist.
 func GatewayNotFound(entry *resource.Entry, gateway string) diag.Message {
-	var o resource.Origin
-	if entry != nil {
-		o = entry.Origin
-	}
 	return diag.NewMessage(
 		diag.Error,
 		diag.Code(20),
-		o,
+		originOrNil(entry),
 		"Referenced Gateway not found: %q",
 		gateway,
 	)
+}
+
+func originOrNil(e *resource.Entry) resource.Origin {
+	var o resource.Origin
+	if e != nil {
+		o = e.Origin
+	}
+	return o
 }

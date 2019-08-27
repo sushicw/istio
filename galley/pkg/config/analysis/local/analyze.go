@@ -56,7 +56,7 @@ func (sa *SourceAnalyzer) Analyze(cancel chan struct{}) (diag.Messages, error) {
 	meshsrc.Set(meshcfg.Default())
 
 	if len(sa.sources) == 0 {
-		return nil, fmt.Errorf("At least one file and/or kubernetes source must be provided")
+		return nil, fmt.Errorf("at least one file and/or kubernetes source must be provided")
 	}
 	src := newPrecedenceSource(sa.sources)
 

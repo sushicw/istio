@@ -17,6 +17,7 @@ package local
 
 import (
 	"github.com/gogo/protobuf/types"
+
 	"istio.io/istio/galley/pkg/config/event"
 	"istio.io/istio/galley/pkg/config/resource"
 	"istio.io/istio/galley/pkg/config/testing/data"

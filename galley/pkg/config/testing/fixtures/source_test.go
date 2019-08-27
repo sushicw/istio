@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/onsi/gomega"
+
 	"istio.io/istio/galley/pkg/config/event"
 	"istio.io/istio/galley/pkg/config/testing/data"
 )
