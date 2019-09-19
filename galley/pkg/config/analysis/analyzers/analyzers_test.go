@@ -15,6 +15,7 @@
 package analyzers
 
 import (
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -25,6 +26,7 @@ import (
 	"istio.io/istio/galley/pkg/config/analysis/diag"
 	"istio.io/istio/galley/pkg/config/analysis/local"
 	"istio.io/istio/galley/pkg/config/analysis/msg"
+	"istio.io/istio/galley/pkg/config/collection"
 	"istio.io/istio/galley/pkg/config/processor/metadata"
 )
 
@@ -78,6 +80,8 @@ var testGrid = []testCase{
 
 // TestAnalyzers allows for table-based testing of Analyzers.
 func TestAnalyzers(t *testing.T) {
+	requestedInputsByAnalyzer := make(map[string]map[collection.Name]bool)
+
 	for _, testCase := range testGrid {
 		testCase := testCase // Capture range variable so subtests work correctly
 		t.Run(testCase.name, func(t *testing.T) {
@@ -90,11 +94,33 @@ func TestAnalyzers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error running analysis on testcase %s: %v", testCase.name, err)
 			}
+
+			analyzerName := testCase.analyzer.Metadata().Name
+			if _, ok := requestedInputsByAnalyzer[analyzerName]; !ok {
+				requestedInputsByAnalyzer[analyzerName] = make(map[collection.Name]bool)
+			}
+			for col := range sa.RequestedInputs() {
+				requestedInputsByAnalyzer[analyzerName][col] = true
+			}
+
 			actualMsgs := extractFields(msgs)
 			g.Expect(actualMsgs).To(ConsistOf(testCase.expected))
 		})
 	}
+
+	t.Run("CheckMetadataInputs", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+		for _, a := range All() {
+			requestedInputs := make([]collection.Name, 0)
+			for col := range requestedInputsByAnalyzer[a.Metadata().Name] {
+				requestedInputs = append(requestedInputs, col)
+			}
+			g.Expect(a.Metadata().Inputs).To(ConsistOf(requestedInputs), fmt.Sprintf("Metadata inputs for analyzer %q don't match actual collections accessed during testing. Either the metadata is wrong or testing is insufficient.", a.Metadata().Name))
+		}
+	})
 }
+
+//TODO: Test to enforce that metadata names are unique
 
 // Pull just the fields we want to check out of diag.Message
 func extractFields(msgs []diag.Message) []message {

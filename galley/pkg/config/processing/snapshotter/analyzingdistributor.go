@@ -31,8 +31,9 @@ type AnalyzingDistributor struct {
 	analyzer    analysis.Analyzer
 	distributor Distributor
 
-	analysisMu     sync.Mutex
-	cancelAnalysis chan struct{}
+	analysisMu      sync.Mutex
+	cancelAnalysis  chan struct{}
+	requestedInputs map[collection.Name]bool
 
 	snapshotsMu   sync.RWMutex
 	lastSnapshots map[string]*Snapshot
@@ -90,8 +91,9 @@ func (d *AnalyzingDistributor) Distribute(name string, s *Snapshot) {
 func (d *AnalyzingDistributor) analyzeAndDistribute(cancelCh chan struct{}, s *Snapshot) {
 	// For analysis, we use a combined snapshot
 	ctx := &context{
-		sn:       d.getCombinedSnapshot(),
-		cancelCh: cancelCh,
+		sn:              d.getCombinedSnapshot(),
+		cancelCh:        cancelCh,
+		requestedInputs: make(map[collection.Name]bool),
 	}
 
 	scope.Analysis.Debugf("Beginning analyzing the current snapshot")
@@ -101,6 +103,8 @@ func (d *AnalyzingDistributor) analyzeAndDistribute(cancelCh chan struct{}, s *S
 	if !ctx.Canceled() {
 		d.updater.Update(ctx.messages)
 	}
+
+	d.updateRequestedInputs(ctx)
 
 	// Execution only reaches this point for default snapshot group
 	d.distributor.Distribute(defaultSnapshotGroup, s)
@@ -125,31 +129,49 @@ func (d *AnalyzingDistributor) getCombinedSnapshot() *Snapshot {
 	return &Snapshot{set: collection.NewSetFromCollections(collections)}
 }
 
+//RequestedInputs returns the set of collections that were accessed in the most recent analysis session
+//TODO: different name?
+//TODO: Is there a more elegant way to do this whole thing?
+func (d *AnalyzingDistributor) RequestedInputs() map[collection.Name]bool {
+	return d.requestedInputs
+}
+
+// TODO: Should this merge the requestedInputs list? (so we're representing everything accessed since the AnalyzingDistributor began)
+func (d *AnalyzingDistributor) updateRequestedInputs(ctx *context) {
+	d.analysisMu.Lock()
+	defer d.analysisMu.Unlock()
+	d.requestedInputs = ctx.requestedInputs
+}
+
 type context struct {
-	sn       *Snapshot
-	cancelCh chan struct{}
-	messages diag.Messages
+	sn              *Snapshot
+	cancelCh        chan struct{}
+	messages        diag.Messages
+	requestedInputs map[collection.Name]bool // TODO: Should this be a named type?
 }
 
 var _ analysis.Context = &context{}
 
 // Report implements analysis.Context
-func (c *context) Report(coll collection.Name, m diag.Message) {
+func (c *context) Report(col collection.Name, m diag.Message) {
 	c.messages.Add(m)
 }
 
 // Find implements analysis.Context
-func (c *context) Find(cpl collection.Name, name resource.Name) *resource.Entry {
-	return c.sn.Find(cpl, name)
+func (c *context) Find(col collection.Name, name resource.Name) *resource.Entry {
+	c.requestedInputs[col] = true
+	return c.sn.Find(col, name)
 }
 
 // Exists implements analysis.Context
-func (c *context) Exists(cpl collection.Name, name resource.Name) bool {
-	return c.Find(cpl, name) != nil
+func (c *context) Exists(col collection.Name, name resource.Name) bool {
+	c.requestedInputs[col] = true
+	return c.Find(col, name) != nil
 }
 
 // ForEach implements analysis.Context
 func (c *context) ForEach(col collection.Name, fn analysis.IteratorFn) {
+	c.requestedInputs[col] = true
 	c.sn.ForEach(col, fn)
 }
 

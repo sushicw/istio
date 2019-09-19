@@ -52,6 +52,9 @@ type SourceAnalyzer struct {
 	// Which collections are used by this analysis
 	// Derived from the specified analyzer and transformer providers
 	inputCollections map[collection.Name]struct{}
+
+	// Collections actually accessed by the most recent call to Analyze
+	requestedInputs map[collection.Name]bool
 }
 
 // NewSourceAnalyzer creates a new SourceAnalyzer with no sources. Use the Add*Source methods to add sources in ascending precedence order,
@@ -87,6 +90,7 @@ func (sa *SourceAnalyzer) Analyze(cancel chan struct{}) (diag.Messages, error) {
 	defer rt.Stop()
 
 	if updater.WaitForReport(cancel) {
+		sa.requestedInputs = distributor.RequestedInputs()
 		return updater.Get(), nil
 	}
 
@@ -134,6 +138,10 @@ func (sa *SourceAnalyzer) AddRunningKubeSource(k client.Interfaces) {
 	src := apiserverNew(o)
 
 	sa.sources = append(sa.sources, src)
+}
+
+func (sa *SourceAnalyzer) RequestedInputs() map[collection.Name]bool {
+	return sa.requestedInputs
 }
 
 func getUpstreamCollections(analyzer analysis.Analyzer, xformProviders transformer.Providers) map[collection.Name]struct{} {

@@ -21,10 +21,15 @@ import (
 )
 
 // All returns all analyzers
-func All() analysis.Analyzer {
-	return analysis.Combine("all",
+func All() []analysis.Analyzer {
+	return []analysis.Analyzer{
 		&virtualservice.GatewayAnalyzer{},
 		&virtualservice.DestinationAnalyzer{},
 		&auth.ServiceRoleBindingAnalyzer{},
-	)
+	}
+}
+
+// AllCombined returns all analyzers combined as one
+func AllCombined() analysis.Analyzer {
+	return analysis.Combine("all", All()...)
 }
