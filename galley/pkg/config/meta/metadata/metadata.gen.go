@@ -610,6 +610,7 @@ snapshots:
   - name: "localAnalysis"
     strategy: immediate
     collections:
+      - "istio/rbac/v1alpha1/clusterrbacconfigs"
       - "istio/rbac/v1alpha1/servicerolebindings"
       - "istio/rbac/v1alpha1/serviceroles"
       - "istio/mesh/v1alpha1/MeshConfig"
