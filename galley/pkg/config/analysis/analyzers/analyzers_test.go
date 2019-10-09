@@ -189,6 +189,7 @@ var testGrid = []testCase{
 
 // TestAnalyzers allows for table-based testing of Analyzers.
 func TestAnalyzers(t *testing.T) {
+	t.Skip("https://github.com/istio/istio/issues/17617")
 	requestedInputsByAnalyzer := make(map[string]map[collection.Name]struct{})
 
 	// Temporarily make logging more verbose to debug https://github.com/istio/istio/issues/17617
