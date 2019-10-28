@@ -25,31 +25,21 @@ type Level struct {
 	name      string
 }
 
-// String satisfies interface pflag.Value
-func (l *Level) String() string {
+func (l Level) String() string {
 	return l.name
 }
 
-// Type satisfies interface pflag.Value
-func (l *Level) Type() string {
-	return "Level"
+func (l Level) IsWorseThanOrEqualTo(target Level) bool {
+	return l.sortOrder <= target.sortOrder
 }
 
-// Set satisfies interface pflag.Value
-func (l *Level) Set(s string) error {
-
+func LevelFromString(s string) (Level, error) {
 	val, ok := GetUppercaseStringToLevelMap()[strings.ToUpper(s)]
 	if !ok {
-		return fmt.Errorf("%q not a valid option, please choose from: %v", s, GetAllLevelStrings())
+		return Level{}, fmt.Errorf("%q not a valid option, please choose from: %v", s, GetAllLevelStrings())
 	}
 
-	l.sortOrder = val.sortOrder
-	l.name = val.name
-	return nil
-}
-
-func (l *Level) IsWorseThanOrEqualTo(target Level) bool {
-	return l.sortOrder <= target.sortOrder
+	return val, nil
 }
 
 var (

@@ -42,11 +42,34 @@ func (f AnalyzerFoundIssuesError) Error() string {
 	return FoundIssueString
 }
 
+type messageLevelParser struct {
+	l diag.Level
+}
+
+// String satisfies interface pflag.Value
+func (m *messageLevelParser) String() string {
+	return m.l.String()
+}
+
+// Type satisfies interface pflag.Value
+func (m *messageLevelParser) Type() string {
+	return "Level"
+}
+
+// Set satisfies interface pflag.Value
+func (m *messageLevelParser) Set(s string) error {
+	l, err := diag.LevelFromString(s)
+	if err != nil {
+		return err
+	}
+	m.l = l
+	return nil
+}
+
 var (
-	useKube               bool
-	useDiscovery          string
-	messageLevelThreshold = diag.Warning // messages at least this level will generate an error exit code
-	colorize              bool
+	useKube      bool
+	useDiscovery string
+	colorize     bool
 
 	termEnvVar = env.RegisterStringVar("TERM", "", "Specifies terminal type.  Use 'dumb' to suppress color output")
 
@@ -55,6 +78,8 @@ var (
 		diag.Warning: "\033[33m",   // yellow
 		diag.Error:   "\033[1;31m", // bold red
 	}
+
+	messageLevel = messageLevelParser{l: diag.Warning}
 )
 
 // Analyze command
@@ -184,9 +209,8 @@ istioctl experimental analyze -k -d false
 	analysisCmd.PersistentFlags().BoolVar(&colorize, "color", istioctlColorDefault(analysisCmd),
 		"Default true.  Disable with '=false' or set $TERM to dumb")
 	analysisCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
-	analysisCmd.PersistentFlags().Var(&messageLevelThreshold, "threshold",
-		"The severity level of analysis at which to set a non-zero exit code. "+
-			"Defaults to WARN, with INFO and ERROR being the other values.")
+	analysisCmd.PersistentFlags().Var(&messageLevel, "threshold",
+		fmt.Sprintf("The severity level of analysis at which to set a non-zero exit code. Valid values: %v", diag.GetAllLevelStrings()))
 	return analysisCmd
 }
 
@@ -219,7 +243,7 @@ func colorPrefix(m diag.Message) string {
 		return ""
 	}
 
-	prefix, ok := colorPrefixes[*m.Type.Level()]
+	prefix, ok := colorPrefixes[m.Type.Level()]
 	if !ok {
 		return ""
 	}
@@ -262,7 +286,7 @@ func istioctlColorDefault(cmd *cobra.Command) bool {
 func errorIfMessagesExceedThreshold(messages []diag.Message) error {
 	foundIssues := false
 	for _, m := range messages {
-		if m.Type.Level().IsWorseThanOrEqualTo(messageLevelThreshold) {
+		if m.Type.Level().IsWorseThanOrEqualTo(messageLevel.l) {
 			foundIssues = true
 		}
 	}
