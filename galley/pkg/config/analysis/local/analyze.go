@@ -209,7 +209,7 @@ func (sa *SourceAnalyzer) AddRunningKubeSource(k kube.Interfaces) {
 	}
 
 	if err := sa.addRunningKubeMeshConfigSource(k); err != nil {
-		scope.Analysis.Errorf("error getting mesh config from running kube source: %v", err)
+		scope.Analysis.Errorf("error getting mesh config from running kube source (defaults will be used instead): %v", err)
 	}
 
 	src := apiserverNew(o)

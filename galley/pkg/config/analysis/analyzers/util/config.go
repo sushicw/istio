@@ -38,7 +38,7 @@ func MeshConfig(ctx analysis.Context) *v1alpha1.MeshConfig {
 
 // IsSystemNamespace returns true for system namespaces
 func IsSystemNamespace(ns resource.Namespace) bool {
-	return ns == "kube-system" || ns == "kube-public"
+	return ns == "kube-system" || ns == "kube-public" || ns == "knative-serving"
 }
 
 // IsIstioControlPlane returns true for resources that are part of the Istio control plane
